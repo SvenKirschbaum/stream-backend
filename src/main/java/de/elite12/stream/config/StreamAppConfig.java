@@ -14,6 +14,8 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.config.annotation.web.messaging.MessageSecurityMetadataSourceRegistry;
+import org.springframework.security.config.annotation.web.socket.AbstractSecurityWebSocketMessageBrokerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -27,53 +29,81 @@ import java.util.Arrays;
 import java.util.Collections;
 
 @Configuration
-@EnableWebSecurity
 @EnableGlobalMethodSecurity(prePostEnabled = true)
 @EnableScheduling
-@EnableWebSocket
-@EnableWebSocketMessageBroker
-public class StreamAppConfig extends WebSecurityConfigurerAdapter implements WebSocketMessageBrokerConfigurer {
-    @Autowired
-    private CustomJwtAuthenticationConverter jwtAuthenticationConverter;
-    @Autowired
-    private TaskScheduler messageBrokerTaskScheduler;
+public class StreamAppConfig {
 
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http
-            .csrf().disable()
-            .cors().and()
-            .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
-            .oauth2ResourceServer().jwt().jwtAuthenticationConverter(jwtAuthenticationConverter).and().and()
-            .headers().disable()
-            .authorizeRequests().requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("actuator");
+    @Configuration
+    @EnableWebSocket
+    @EnableWebSocketMessageBroker
+    public static class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
+        @Autowired
+        private TaskScheduler messageBrokerTaskScheduler;
+
+        @Override
+        public void configureMessageBroker(MessageBrokerRegistry config) {
+            config.enableSimpleBroker("/topic").setHeartbeatValue(new long[]{30000, 30000}).setTaskScheduler(this.messageBrokerTaskScheduler);
+            config.setApplicationDestinationPrefixes("/app");
+        }
+
+        @Override
+        public void registerStompEndpoints(StompEndpointRegistry registry) {
+            registry.addEndpoint("/sock").setAllowedOriginPatterns("*").withSockJS().setSessionCookieNeeded(false);
+        }
     }
 
-    @Bean
-    public RemoteIpFilter remoteIpFilter() {
-        return new RemoteIpFilter();
+    @Configuration
+    public static class WebSocketSecurityConfig extends AbstractSecurityWebSocketMessageBrokerConfigurer {
+        @Override
+        protected void configureInbound(MessageSecurityMetadataSourceRegistry messages) {
+            messages
+                    //Allow non destination messages (e.g. connect, unsubscribe, ...)
+                    .nullDestMatcher().permitAll()
+                    //Allow subscriptionto racecontrol topic
+                    .simpSubscribeDestMatchers("/topic/racecontrol").permitAll()
+                    //Deny all other messages
+                    .anyMessage().denyAll();
+        }
+
+        @Override
+        protected boolean sameOriginDisabled() {
+            return true;
+        }
     }
 
-    @Bean
-    CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(Collections.singletonList("*"));
-        configuration.setAllowedHeaders(Arrays.asList("origin", "content-type", "accept", "authorization"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
-        configuration.setAllowCredentials(true);
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
-    }
+    @Configuration
+    @EnableWebSecurity
+    public static class WebSecurityConfiguration extends WebSecurityConfigurerAdapter {
+        @Autowired
+        private CustomJwtAuthenticationConverter jwtAuthenticationConverter;
 
-    @Override
-    public void configureMessageBroker(MessageBrokerRegistry config) {
-        config.enableSimpleBroker("/topic").setHeartbeatValue(new long[]{30000, 30000}).setTaskScheduler(this.messageBrokerTaskScheduler);
-        config.setApplicationDestinationPrefixes("/app");
-    }
 
-    @Override
-    public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/sock").setAllowedOriginPatterns("*").withSockJS().setSessionCookieNeeded(false);
+        @Override
+        protected void configure(HttpSecurity http) throws Exception {
+            http
+                .csrf().disable()
+                .cors().and()
+                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
+                .oauth2ResourceServer().jwt().jwtAuthenticationConverter(jwtAuthenticationConverter).and().and()
+                .headers().disable()
+                .authorizeRequests().requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("actuator");
+        }
+
+        @Bean
+        public RemoteIpFilter remoteIpFilter() {
+            return new RemoteIpFilter();
+        }
+
+        @Bean
+        CorsConfigurationSource corsConfigurationSource() {
+            CorsConfiguration configuration = new CorsConfiguration();
+            configuration.setAllowedOriginPatterns(Collections.singletonList("*"));
+            configuration.setAllowedHeaders(Arrays.asList("origin", "content-type", "accept", "authorization"));
+            configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
+            configuration.setAllowCredentials(true);
+            UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+            source.registerCorsConfiguration("/**", configuration);
+            return source;
+        }
     }
 }
