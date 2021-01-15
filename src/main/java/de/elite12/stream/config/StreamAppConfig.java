@@ -42,7 +42,7 @@ public class StreamAppConfig {
 
         @Override
         public void configureMessageBroker(MessageBrokerRegistry config) {
-            config.enableSimpleBroker("/topic").setHeartbeatValue(new long[]{30000, 30000}).setTaskScheduler(this.messageBrokerTaskScheduler);
+            config.enableSimpleBroker("/topic", "/queue").setHeartbeatValue(new long[]{30000, 30000}).setTaskScheduler(this.messageBrokerTaskScheduler);
             config.setApplicationDestinationPrefixes("/app");
         }
 
@@ -61,6 +61,10 @@ public class StreamAppConfig {
                     .nullDestMatcher().permitAll()
                     //Allow subscriptionto racecontrol topic
                     .simpSubscribeDestMatchers("/topic/racecontrol").permitAll()
+                    //Allow using test features
+                    .simpSubscribeDestMatchers("/topic/test").permitAll()
+                    .simpSubscribeDestMatchers("/user/queue/echoreply").permitAll()
+                    .simpMessageDestMatchers("/app/echo").permitAll()
                     //Deny all other messages
                     .anyMessage().denyAll();
         }
