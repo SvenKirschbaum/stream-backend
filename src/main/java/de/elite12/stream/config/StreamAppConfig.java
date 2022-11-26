@@ -13,10 +13,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.annotation.web.messaging.MessageSecurityMetadataSourceRegistry;
 import org.springframework.security.config.annotation.web.socket.AbstractSecurityWebSocketMessageBrokerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -77,20 +77,20 @@ public class StreamAppConfig {
 
     @Configuration
     @EnableWebSecurity
-    public static class WebSecurityConfiguration extends WebSecurityConfigurerAdapter {
+    public static class WebSecurityConfiguration {
         @Autowired
         private CustomJwtAuthenticationConverter jwtAuthenticationConverter;
 
-
-        @Override
-        protected void configure(HttpSecurity http) throws Exception {
+        @Bean
+        public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
             http
-                .csrf().disable()
-                .cors().and()
-                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
-                .oauth2ResourceServer().jwt().jwtAuthenticationConverter(jwtAuthenticationConverter).and().and()
-                .headers().disable()
-                .authorizeRequests().requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("actuator");
+                    .csrf().disable()
+                    .cors().and()
+                    .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
+                    .oauth2ResourceServer().jwt().jwtAuthenticationConverter(jwtAuthenticationConverter).and().and()
+                    .headers().disable()
+                    .authorizeRequests().requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("actuator");
+            return http.build();
         }
 
         @Bean
