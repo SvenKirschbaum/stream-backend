@@ -1,4 +1,4 @@
-FROM maven:3.9.11-amazoncorretto-21@sha256:8bb189a6673bb8b674af267ead6037e2d0508c950daac45c3360e57093476c07 as build
+FROM maven:3.9.11-amazoncorretto-25@sha256:82dd40503c5815d4ed879f9b604e02bd85897c43a23b9727d791cc8b73bf3e23 as build
 
 WORKDIR /build
 
@@ -7,7 +7,7 @@ COPY src src
 
 RUN mvn package
 
-FROM amazoncorretto:21.0.8-alpine@sha256:fda60fd7965970ce7ed7ce789b18418647b56ac6112fc17df006337bdc6355c4
+FROM amazoncorretto:25.0.0-alpine@sha256:807ea3c4000a052986cd1e7097a883f9cd7a6e527f73841f462e3d04851b8835
 
 WORKDIR /usr/locale/stream-backend
 
