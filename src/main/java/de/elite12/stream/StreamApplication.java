@@ -7,13 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class StreamApplication {
 
     public static void main(String[] args) {
-        try {
-            SpringApplication.run(StreamApplication.class, args);
-        }
-        catch (Exception e) {
-            //Shutdown JVM on Spring Context initialization Errror
-            System.exit(-1);
-        }
+        SpringApplication.run(StreamApplication.class, args);
     }
 
 }

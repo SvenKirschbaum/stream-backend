@@ -2,20 +2,27 @@ package de.elite12.stream.config;
 
 import de.elite12.stream.util.CustomJwtAuthenticationConverter;
 import org.apache.catalina.filters.RemoteIpFilter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.ApplicationContext;
+import org.springframework.messaging.handler.invocation.HandlerMethodArgumentResolver;
+import org.springframework.messaging.Message;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.authorization.AuthorizationEventPublisher;
+import org.springframework.security.authorization.SpringAuthorizationEventPublisher;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.messaging.MessageSecurityMetadataSourceRegistry;
-import org.springframework.security.config.annotation.web.socket.AbstractSecurityWebSocketMessageBrokerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.messaging.access.intercept.AuthorizationChannelInterceptor;
+import org.springframework.security.messaging.access.intercept.MessageMatcherDelegatingAuthorizationManager;
+import org.springframework.security.messaging.context.AuthenticationPrincipalArgumentResolver;
+import org.springframework.security.messaging.context.SecurityContextChannelInterceptor;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -27,9 +34,10 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 @Configuration
-@EnableGlobalMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity
 @EnableScheduling
 public class StreamAppConfig {
 
@@ -37,12 +45,18 @@ public class StreamAppConfig {
     @EnableWebSocket
     @EnableWebSocketMessageBroker
     public static class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
-        @Autowired
-        private TaskScheduler messageBrokerTaskScheduler;
+
+        private final TaskScheduler messageBrokerTaskScheduler;
+
+        public WebSocketConfiguration(TaskScheduler messageBrokerTaskScheduler) {
+            this.messageBrokerTaskScheduler = messageBrokerTaskScheduler;
+        }
 
         @Override
         public void configureMessageBroker(MessageBrokerRegistry config) {
-            config.enableSimpleBroker("/topic", "/queue").setHeartbeatValue(new long[]{30000, 30000}).setTaskScheduler(this.messageBrokerTaskScheduler);
+            config.enableSimpleBroker("/topic", "/queue")
+                    .setHeartbeatValue(new long[]{30000, 30000})
+                    .setTaskScheduler(this.messageBrokerTaskScheduler);
             config.setApplicationDestinationPrefixes("/app");
         }
 
@@ -53,43 +67,66 @@ public class StreamAppConfig {
     }
 
     @Configuration
-    public static class WebSocketSecurityConfig extends AbstractSecurityWebSocketMessageBrokerConfigurer {
-        @Override
-        protected void configureInbound(MessageSecurityMetadataSourceRegistry messages) {
+    public static class WebSocketSecurityConfig implements WebSocketMessageBrokerConfigurer {
+
+        private final ApplicationContext applicationContext;
+
+        public WebSocketSecurityConfig(ApplicationContext applicationContext) {
+            this.applicationContext = applicationContext;
+        }
+
+        @Bean
+        AuthorizationManager<Message<?>> messageAuthorizationManager() {
+            MessageMatcherDelegatingAuthorizationManager.Builder messages = MessageMatcherDelegatingAuthorizationManager.builder();
             messages
-                    //Allow non destination messages (e.g. connect, unsubscribe, ...)
                     .nullDestMatcher().permitAll()
-                    //Allow subscriptionto racecontrol topic
                     .simpSubscribeDestMatchers("/topic/racecontrol").permitAll()
-                    //Allow using test features
                     .simpSubscribeDestMatchers("/topic/test").permitAll()
                     .simpSubscribeDestMatchers("/user/queue/echoreply").permitAll()
                     .simpMessageDestMatchers("/app/echo").permitAll()
-                    //Deny all other messages
                     .anyMessage().denyAll();
+
+            return messages.build();
         }
 
         @Override
-        protected boolean sameOriginDisabled() {
-            return true;
+        public void addArgumentResolvers(List<HandlerMethodArgumentResolver> argumentResolvers) {
+            argumentResolvers.add(new AuthenticationPrincipalArgumentResolver());
+        }
+
+        @Override
+        public void configureClientInboundChannel(ChannelRegistration registration) {
+            AuthorizationChannelInterceptor authz = new AuthorizationChannelInterceptor(messageAuthorizationManager());
+            AuthorizationEventPublisher publisher = new SpringAuthorizationEventPublisher(this.applicationContext);
+            authz.setAuthorizationEventPublisher(publisher);
+            registration.interceptors(new SecurityContextChannelInterceptor(), authz);
         }
     }
 
     @Configuration
     @EnableWebSecurity
     public static class WebSecurityConfiguration {
-        @Autowired
-        private CustomJwtAuthenticationConverter jwtAuthenticationConverter;
+
+        private final CustomJwtAuthenticationConverter jwtAuthenticationConverter;
+
+        public WebSecurityConfiguration(CustomJwtAuthenticationConverter jwtAuthenticationConverter) {
+            this.jwtAuthenticationConverter = jwtAuthenticationConverter;
+        }
 
         @Bean
         public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
             http
-                    .csrf().disable()
-                    .cors().and()
-                    .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS).and()
-                    .oauth2ResourceServer().jwt().jwtAuthenticationConverter(jwtAuthenticationConverter).and().and()
-                    .headers().disable()
-                    .authorizeRequests().requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("actuator");
+                    .csrf((csrf) -> csrf.disable())
+                    .cors(Customizer.withDefaults())
+                    .sessionManagement((session) -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                    .oauth2ResourceServer((oauth2) -> oauth2
+                            .jwt((jwt) -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+                    )
+                    .headers((headers) -> headers.disable())
+                    .authorizeHttpRequests((authorize) -> authorize
+                            .requestMatchers("/manage/**").hasRole("actuator")
+                            .anyRequest().permitAll()
+                    );
             return http.build();
         }
 
